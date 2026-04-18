@@ -1,6 +1,6 @@
 # Learning Path — Content Automation Product
 
-Your existing skills are strong: AWS, EKS, Terraform, Helm, ArgoCD, Python, Go, Prometheus/Grafana, PostgreSQL, Redis.
+Your existing skills are strong: OCI, OKE, Terraform, Helm, ArgoCD, Python, Go, Prometheus/Grafana, PostgreSQL, Redis.
 This learning path covers only the **gaps** needed for this specific product.
 
 ---
@@ -90,15 +90,15 @@ Run your weather DAG on KubernetesExecutor, watch pods spin up and die.
 
 ---
 
-## Stage 3 — Ollama on EKS + Karpenter GPU Nodes (1 week)
+## Stage 3 — Ollama on OKE + GPU Nodes (1 week)
 
-**Goal**: You know EKS. Learn to run Ollama as a K8s service with GPU auto-scaling.
+**Goal**: You know OKE well. Learn to run Ollama as a K8s service with GPU auto-scaling.
 
 ### 3.1 Ollama on Kubernetes (2 days)
 - [ ] Read: [Ollama Docker docs](https://hub.docker.com/r/ollama/ollama)
 - [ ] Read: [Ollama REST API reference](https://github.com/ollama/ollama/blob/main/docs/api.md)
 
-**Mini project**: Deploy Ollama to your EKS cluster:
+**Mini project**: Deploy Ollama to your OKE cluster:
 ```yaml
 # Key parts of the Deployment
 resources:
@@ -110,28 +110,60 @@ Call it from Python using `requests.post`.
 
 ---
 
-### 3.2 Karpenter for GPU auto-scaling (3 days)
-- [ ] Read: [Karpenter Getting Started on EKS](https://karpenter.sh/docs/getting-started/getting-started-with-karpenter/)
-- [ ] Read: [Karpenter NodePool with GPU instance types](https://karpenter.sh/docs/concepts/nodepools/)
+### 3.2 OKE Cluster Autoscaler for GPU scaling (3 days)
+- [ ] Read: [OKE Cluster Autoscaler docs](https://docs.oracle.com/en-us/iaas/Content/ContEng/Tasks/contengusingclusterautoscaler.htm)
+- [ ] Read: [OKE Node Pools with GPU shapes](https://docs.oracle.com/en-us/iaas/Content/ContEng/Reference/contengimagesshapes.htm)
 
-**Mini project**: Create a Karpenter NodePool that:
-- Only provisions `g4dn.xlarge` nodes
+**Mini project**: Create an OKE node pool that:
+- Only provisions `VM.GPU.A10.1` nodes
 - Has a `nvidia.com/gpu` taint
-- Scales to 0 after 5 minutes idle
-Deploy your Ollama 70B with a GPU toleration and watch Karpenter provision/deprovision the node.
+- Scales to 0 after 5 minutes idle (via Cluster Autoscaler `scale-down-unneeded-time`)
+Deploy your Ollama 70B with a GPU toleration and watch the autoscaler provision/deprovision the node.
 
 ---
 
-## Stage 4 — Web Scraping & SearXNG (3 days)
+## Stage 4 — OCI Object Storage + SDK (2 days)
 
-### 4.1 RSS + feedparser (1 day)
+**Goal**: Replace S3 calls — learn OCI Object Storage and the Python SDK.
+
+- [ ] Read: [OCI Object Storage docs](https://docs.oracle.com/en-us/iaas/Content/Object/Concepts/objectstorageoverview.htm)
+- [ ] Read: [OCI Python SDK — Object Storage](https://docs.oracle.com/en-us/iaas/tools/python/latest/api/object_storage.html)
+- [ ] Read: [OCI Instance Principals auth](https://docs.oracle.com/en-us/iaas/Content/Identity/Tasks/callingservicesfrominstances.htm)
+
+**Mini project**: From a Python script running inside OKE (or locally with `~/.oci/config`):
+1. Create a bucket
+2. Upload a JSON file
+3. Download it back and verify the contents
+
+```python
+import oci
+
+# In OKE pods — uses workload/instance identity (no config file needed)
+signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
+object_storage = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
+
+namespace = object_storage.get_namespace().data
+object_storage.put_object(
+    namespace_name=namespace,
+    bucket_name="my-bucket",
+    object_name="test.json",
+    put_object_body='{"hello": "oracle"}',
+    content_type="application/json",
+)
+```
+
+---
+
+## Stage 5 — Web Scraping & SearXNG (3 days)
+
+### 5.1 RSS + feedparser (1 day)
 - [ ] Read: [feedparser docs](https://feedparser.readthedocs.io/en/latest/)
 
 **Mini project**: Script that fetches top 10 articles from 5 Medium RSS feeds, deduplicates by URL, saves to JSON.
 
 ---
 
-### 4.2 SearXNG self-hosted (2 days)
+### 5.2 SearXNG self-hosted (2 days)
 - [ ] Read: [SearXNG docs](https://docs.searxng.org/)
 - [ ] Read: [SearXNG API reference](https://docs.searxng.org/dev/search_api.html)
 
@@ -143,12 +175,12 @@ Write Python function that takes a query, returns top 10 results as list of dict
 
 ---
 
-## Stage 5 — Text-to-Speech with Kokoro (3 days)
+## Stage 6 — Text-to-Speech with Kokoro (3 days)
 
 **Goal**: Generate natural-sounding voice from scripts.
 
 - [ ] Read: [Kokoro TTS GitHub](https://github.com/hexgrad/kokoro)
-- [ ] Read: [Kokoro FastAPI server](https://github.com/remsky/Kokoro-FastAPI) — this is what you deploy on EKS
+- [ ] Read: [Kokoro FastAPI server](https://github.com/remsky/Kokoro-FastAPI) — this is what you deploy on OKE
 
 **Mini project**: Run Kokoro locally:
 ```bash
@@ -162,7 +194,7 @@ Generate 3 different voices for the same script. Pick the best one.
 
 ---
 
-## Stage 6 — FFmpeg Video Composition (3 days)
+## Stage 7 — FFmpeg Video Composition (3 days)
 
 **Goal**: Combine AI video + voice audio into final video.
 
@@ -183,7 +215,7 @@ ffmpeg -stream_loop -1 -i video.mp4 -i audio.mp3 \
 
 ---
 
-## Stage 7 — Telegram Bot (3 days)
+## Stage 8 — Telegram Bot (3 days)
 
 **Goal**: Build the review/approval workflow.
 
@@ -199,9 +231,9 @@ ffmpeg -stream_loop -1 -i video.mp4 -i audio.mp3 \
 
 ---
 
-## Stage 8 — YouTube + Instagram Publishing (1 week)
+## Stage 9 — YouTube + Instagram Publishing (1 week)
 
-### 8.1 YouTube Data API v3 (3 days)
+### 9.1 YouTube Data API v3 (3 days)
 - [ ] Read: [YouTube Data API — Uploading Videos](https://developers.google.com/youtube/v3/guides/uploading_a_video)
 - [ ] Read: [google-api-python-client docs](https://googleapis.github.io/google-api-python-client/docs/)
 
@@ -209,7 +241,7 @@ ffmpeg -stream_loop -1 -i video.mp4 -i audio.mp3 \
 
 ---
 
-### 8.2 Instagram Graph API (3 days)
+### 9.2 Instagram Graph API (3 days)
 - [ ] Read: [Instagram Graph API — Reels Publishing](https://developers.facebook.com/docs/instagram-api/guides/reels-publishing)
   Note: requires a Facebook Business account + Instagram Professional account
 
@@ -217,7 +249,7 @@ ffmpeg -stream_loop -1 -i video.mp4 -i audio.mp3 \
 
 ---
 
-## Stage 9 — RunwayML API (2 days)
+## Stage 10 — RunwayML API (2 days)
 
 - [ ] Read: [RunwayML API docs](https://docs.runwayml.com/)
 - [ ] Sign up for RunwayML account (pay-per-use, ~$0.05 per second of video)
@@ -231,11 +263,12 @@ ffmpeg -stream_loop -1 -i video.mp4 -i audio.mp3 \
 ```
 Week 1-2:  Stage 1 (LLM + RAG) ← most important foundation
 Week 3:    Stage 2 (Airflow on K8s)
-Week 4:    Stage 3 (Ollama + Karpenter)
-Week 5:    Stage 4 + 5 (Scraping + TTS)
-Week 6:    Stage 6 + 7 (FFmpeg + Telegram)
-Week 7-8:  Stage 8 + 9 (Publishing + RunwayML)
-Week 9+:   Build and integrate everything
+Week 4:    Stage 3 (Ollama + OKE GPU autoscaling)
+Week 5:    Stage 4 + 5 (OCI Object Storage + Scraping)
+Week 6:    Stage 6 + 7 (TTS + FFmpeg)
+Week 7:    Stage 8 (Telegram)
+Week 8-9:  Stage 9 + 10 (Publishing + RunwayML)
+Week 10+:  Build and integrate everything
 ```
 
 ---
@@ -255,7 +288,9 @@ requests                   # HTTP client, SearXNG calls
 
 # Airflow
 apache-airflow[kubernetes] # DAG framework
-apache-airflow-providers-amazon  # S3, RDS operators
+
+# OCI
+oci                        # OCI Python SDK (Object Storage, auth)
 
 # Media
 kokoro                     # TTS (or via HTTP to self-hosted server)
@@ -265,7 +300,4 @@ ffmpeg-python              # Python wrapper for FFmpeg
 python-telegram-bot        # Telegram
 google-api-python-client   # YouTube
 requests                   # Instagram Graph API
-
-# Infra (you already know this)
-boto3                      # AWS SDK
 ```

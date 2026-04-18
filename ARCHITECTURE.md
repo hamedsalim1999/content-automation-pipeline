@@ -4,15 +4,15 @@
 
 | Layer | Technology | Notes |
 |---|---|---|
-| **Orchestration** | Apache Airflow (Helm on EKS) | KubernetesExecutor — each task = isolated pod |
-| **LLM** | Ollama on EKS (Llama 3.1) | 8B on CPU pods, 70B on GPU node via Karpenter |
-| **Embeddings** | sentence-transformers on EKS | `nomic-embed-text`, CPU only |
-| **Vector DB** | Qdrant (Helm on EKS) | StatefulSet + PVC |
+| **Orchestration** | Apache Airflow (Helm on OKE) | KubernetesExecutor — each task = isolated pod |
+| **LLM** | Ollama on OKE (Llama 3.1) | 8B on CPU pods, 70B on GPU node via OKE Autoscaler |
+| **Embeddings** | sentence-transformers on OKE | `nomic-embed-text`, CPU only |
+| **Vector DB** | Qdrant (Helm on OKE) | StatefulSet + PVC |
 | **Queue** | Redis Streams | Airflow state + inter-service events |
-| **Database** | PostgreSQL (AWS RDS) | Pipeline metadata, content state |
-| **Object Storage** | AWS S3 | Articles, audio, video files |
-| **Web Research** | SearXNG (self-hosted on EKS) | Open source metasearch, replaces Tavily |
-| **TTS** | Kokoro TTS (self-hosted on EKS) | Best open source TTS quality |
+| **Database** | PostgreSQL (OCI Database Service) | Pipeline metadata, content state |
+| **Object Storage** | OCI Object Storage | Articles, audio, video files |
+| **Web Research** | SearXNG (self-hosted on OKE) | Open source metasearch, replaces Tavily |
+| **TTS** | Kokoro TTS (self-hosted on OKE) | Best open source TTS quality |
 | **Video Compose** | FFmpeg | Audio + visuals composition |
 | **AI Video** | RunwayML API | Only external paid dependency |
 | **Scraping** | RSS (feedparser) + Playwright | Free, no API key |
@@ -36,21 +36,21 @@ graph TB
         SEARXNG[SearXNG<br/>Self-hosted metasearch]
     end
 
-    subgraph "AI Layer - Ollama on EKS"
+    subgraph "AI Layer - Ollama on OKE"
         OLLAMA_8B[Ollama Llama 3.1 8B<br/>CPU node<br/>fact-check / scripts / classify]
-        OLLAMA_70B[Ollama Llama 3.1 70B<br/>GPU node via Karpenter<br/>article generation]
+        OLLAMA_70B[Ollama Llama 3.1 70B<br/>GPU node via OKE Autoscaler<br/>article generation]
         EMBED[sentence-transformers<br/>nomic-embed-text<br/>CPU node]
     end
 
     subgraph "Storage"
-        S3[(AWS S3<br/>articles / audio / video)]
+        OCI_OBJ[(OCI Object Storage<br/>articles / audio / video)]
         QDRANT[(Qdrant<br/>Vector DB)]
-        PG[(PostgreSQL RDS<br/>pipeline state)]
+        PG[(PostgreSQL<br/>OCI DB Service)]
         REDIS[(Redis<br/>streams + cache)]
     end
 
     subgraph "Media Production"
-        KOKORO[Kokoro TTS<br/>self-hosted on EKS]
+        KOKORO[Kokoro TTS<br/>self-hosted on OKE]
         FFMPEG[FFmpeg composer<br/>audio + visuals]
         RUNWAY[RunwayML API<br/>AI video generation]
     end
@@ -62,21 +62,21 @@ graph TB
     end
 
     CRON --> MS
-    MS --> S3
+    MS --> OCI_OBJ
     MS --> SEARXNG
     SEARXNG --> EMBED
     EMBED --> QDRANT
     QDRANT --> OLLAMA_70B
-    OLLAMA_70B --> S3
-    S3 --> OLLAMA_8B
-    OLLAMA_8B --> S3
-    S3 --> KOKORO
-    KOKORO --> S3
-    S3 --> RUNWAY
-    RUNWAY --> S3
-    S3 --> FFMPEG
-    FFMPEG --> S3
-    S3 --> TELEGRAM
+    OLLAMA_70B --> OCI_OBJ
+    OCI_OBJ --> OLLAMA_8B
+    OLLAMA_8B --> OCI_OBJ
+    OCI_OBJ --> KOKORO
+    KOKORO --> OCI_OBJ
+    OCI_OBJ --> RUNWAY
+    RUNWAY --> OCI_OBJ
+    OCI_OBJ --> FFMPEG
+    FFMPEG --> OCI_OBJ
+    OCI_OBJ --> TELEGRAM
     TELEGRAM --> |Approve| YOUTUBE
     TELEGRAM --> |Approve| INSTAGRAM
     TELEGRAM --> |Edit| OLLAMA_70B
@@ -109,10 +109,10 @@ graph LR
 
 ---
 
-## Kubernetes Layout on EKS
+## Kubernetes Layout on OKE
 
 ```
-AWS EKS Cluster
+OCI OKE Cluster
 │
 ├── Namespace: airflow
 │   ├── Scheduler (Deployment)
@@ -121,7 +121,7 @@ AWS EKS Cluster
 │
 ├── Namespace: ai
 │   ├── ollama-8b   (Deployment — CPU node, always on)
-│   ├── ollama-70b  (Deployment — GPU node, Karpenter scales to 0 when idle)
+│   ├── ollama-70b  (Deployment — GPU node, OKE Autoscaler scales to 0 when idle)
 │   ├── embeddings  (Deployment — CPU node, always on)
 │   ├── kokoro-tts  (Deployment — CPU node)
 │   └── searxng     (Deployment — CPU node)
@@ -141,24 +141,24 @@ AWS EKS Cluster
 
 ---
 
-## Ollama on EKS — Node Strategy
+## Ollama on OKE — Node Strategy
 
 ```
-CPU Node Pool (always running — t3.xlarge ~$0.17/hr)
+CPU Node Pool (always running — VM.Standard.E4.Flex 4 OCPU ~$0.10/hr)
   └── ollama-8b, embeddings, kokoro-tts, searxng, airflow
 
-GPU Node Pool (Karpenter — scales to 0 when idle)
-  └── ollama-70b on g4dn.xlarge (~$0.52/hr)
+GPU Node Pool (OKE Cluster Autoscaler — scales to 0 when idle)
+  └── ollama-70b on VM.GPU.A10.1 (~$0.45/hr)
       Active only during article generation (~30 min/week)
-      Estimated GPU cost: ~$0.26/week
+      Estimated GPU cost: ~$0.22/week
 ```
 
 ---
 
-## Data Flow in S3
+## Data Flow in OCI Object Storage
 
 ```
-s3://your-bucket/YYYY-WW/
+oci://your-bucket/YYYY-WW/
   ├── raw/          ← scraped Medium articles (JSON)
   ├── research/     ← SearXNG results per topic (JSON)
   ├── articles/     ← generated + fact-checked article (JSON + MD)
@@ -175,8 +175,8 @@ s3://your-bucket/YYYY-WW/
 git push to GitLab
       │
       ▼
-GitLab CI: lint → test → docker build → push to ECR → update Helm values
+GitLab CI: lint → test → docker build → push to OCIR → update Helm values
       │
       ▼
-ArgoCD detects Helm values change → deploy to EKS
+ArgoCD detects Helm values change → deploy to OKE
 ```

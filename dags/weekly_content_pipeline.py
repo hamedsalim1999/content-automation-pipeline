@@ -34,8 +34,9 @@ QDRANT_URL     = "http://qdrant.data.svc.cluster.local:6333"
 SEARXNG_URL    = "http://searxng.ai.svc.cluster.local:8080"
 KOKORO_URL     = "http://kokoro-tts.ai.svc.cluster.local:8880"
 
-# ── AWS / external ────────────────────────────────────────────────────────────
-S3_BUCKET      = Variable.get("S3_BUCKET", default_var="content-automation")
+# ── OCI / external ────────────────────────────────────────────────────────────
+OCI_BUCKET     = Variable.get("OCI_BUCKET", default_var="content-automation")
+OCI_NAMESPACE  = Variable.get("OCI_NAMESPACE")
 RUNWAY_API_KEY = Variable.get("RUNWAY_API_KEY")
 TELEGRAM_TOKEN = Variable.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT  = Variable.get("TELEGRAM_CHAT_ID")
@@ -72,10 +73,10 @@ with DAG(
         """
         Fetch top 10 articles from Medium RSS feeds.
         Returns list of: {title, url, content, tags, published}
-        Saves raw JSON to S3: YYYY-WW/raw/articles.json
+        Saves raw JSON to OCI Object Storage: YYYY-WW/raw/articles.json
         """
         import feedparser
-        import boto3
+        import oci
         import json
         from datetime import datetime
 
@@ -103,13 +104,15 @@ with DAG(
                     "source_feed": url,
                 })
 
-        # Save to S3
-        s3 = boto3.client("s3")
-        s3.put_object(
-            Bucket=S3_BUCKET,
-            Key=f"{week}/raw/articles.json",
-            Body=json.dumps(articles, indent=2),
-            ContentType="application/json",
+        # Save to OCI Object Storage (uses OKE workload identity)
+        signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
+        object_storage = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
+        object_storage.put_object(
+            namespace_name=OCI_NAMESPACE,
+            bucket_name=OCI_BUCKET,
+            object_name=f"{week}/raw/articles.json",
+            put_object_body=json.dumps(articles, indent=2),
+            content_type="application/json",
         )
 
         return articles  # XCom to next task
@@ -133,7 +136,7 @@ with DAG(
         """
         import requests
         import json
-        import boto3
+        import oci
         from datetime import datetime
 
         week = datetime.now().strftime("%Y-%W")
@@ -175,13 +178,15 @@ with DAG(
                 "search_results": search_data.get("results", [])[:10],
             })
 
-        # Save to S3
-        s3 = boto3.client("s3")
-        s3.put_object(
-            Bucket=S3_BUCKET,
-            Key=f"{week}/research/results.json",
-            Body=json.dumps(research_results, indent=2),
-            ContentType="application/json",
+        # Save to OCI Object Storage
+        signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
+        object_storage = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
+        object_storage.put_object(
+            namespace_name=OCI_NAMESPACE,
+            bucket_name=OCI_BUCKET,
+            object_name=f"{week}/research/results.json",
+            put_object_body=json.dumps(research_results, indent=2),
+            content_type="application/json",
         )
 
         return research_results
@@ -268,7 +273,7 @@ with DAG(
         using Llama 3.1 70B on GPU node.
         """
         import requests
-        import boto3
+        import oci
         import json
         from sentence_transformers import SentenceTransformer
         from qdrant_client import QdrantClient
@@ -328,19 +333,22 @@ with DAG(
             "collection_name": collection_name,
         }
 
-        # Save to S3
-        s3 = boto3.client("s3")
-        s3.put_object(
-            Bucket=S3_BUCKET,
-            Key=f"{week}/articles/draft.json",
-            Body=json.dumps(article, indent=2),
-            ContentType="application/json",
+        # Save to OCI Object Storage
+        signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
+        object_storage = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
+        object_storage.put_object(
+            namespace_name=OCI_NAMESPACE,
+            bucket_name=OCI_BUCKET,
+            object_name=f"{week}/articles/draft.json",
+            put_object_body=json.dumps(article, indent=2),
+            content_type="application/json",
         )
-        s3.put_object(
-            Bucket=S3_BUCKET,
-            Key=f"{week}/articles/draft.md",
-            Body=article_content,
-            ContentType="text/markdown",
+        object_storage.put_object(
+            namespace_name=OCI_NAMESPACE,
+            bucket_name=OCI_BUCKET,
+            object_name=f"{week}/articles/draft.md",
+            put_object_body=article_content,
+            content_type="text/markdown",
         )
 
         return article
@@ -362,7 +370,7 @@ with DAG(
         use Llama 3.1 8B to judge accuracy. Returns corrected article.
         """
         import requests
-        import boto3
+        import oci
         import json
         from datetime import datetime
 
@@ -437,13 +445,15 @@ with DAG(
         article["fact_check_issues"] = issues
         article["fact_check_passed"] = len(issues) == 0
 
-        # Save fact-check report to S3
-        s3 = boto3.client("s3")
-        s3.put_object(
-            Bucket=S3_BUCKET,
-            Key=f"{week}/articles/fact_check_report.json",
-            Body=json.dumps({"issues": issues, "passed": article["fact_check_passed"]}, indent=2),
-            ContentType="application/json",
+        # Save fact-check report to OCI Object Storage
+        signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
+        object_storage = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
+        object_storage.put_object(
+            namespace_name=OCI_NAMESPACE,
+            bucket_name=OCI_BUCKET,
+            object_name=f"{week}/articles/fact_check_report.json",
+            put_object_body=json.dumps({"issues": issues, "passed": article["fact_check_passed"]}, indent=2),
+            content_type="application/json",
         )
 
         return article
@@ -465,7 +475,7 @@ with DAG(
         and a 5-7 minute script (long) using Llama 3.1 8B.
         """
         import requests
-        import boto3
+        import oci
         import json
         from datetime import datetime
 
@@ -513,12 +523,14 @@ with DAG(
 
         article["scripts"] = scripts
 
-        s3 = boto3.client("s3")
-        s3.put_object(
-            Bucket=S3_BUCKET,
-            Key=f"{week}/articles/scripts.json",
-            Body=json.dumps(scripts, indent=2),
-            ContentType="application/json",
+        signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
+        object_storage = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
+        object_storage.put_object(
+            namespace_name=OCI_NAMESPACE,
+            bucket_name=OCI_BUCKET,
+            object_name=f"{week}/articles/scripts.json",
+            put_object_body=json.dumps(scripts, indent=2),
+            content_type="application/json",
         )
 
         return article
@@ -536,11 +548,11 @@ with DAG(
     )
     def synthesize_voice(article: dict, **context) -> str:
         """
-        Send short script to Kokoro TTS, save MP3 to S3.
-        Returns S3 key for audio file.
+        Send short script to Kokoro TTS, save MP3 to OCI Object Storage.
+        Returns object key for audio file.
         """
         import requests
-        import boto3
+        import oci
         from datetime import datetime
 
         week = datetime.now().strftime("%Y-%W")
@@ -560,16 +572,18 @@ with DAG(
         )
         tts_response.raise_for_status()
 
-        s3_key = f"{week}/audio/voice.mp3"
-        s3 = boto3.client("s3")
-        s3.put_object(
-            Bucket=S3_BUCKET,
-            Key=s3_key,
-            Body=tts_response.content,
-            ContentType="audio/mpeg",
+        object_key = f"{week}/audio/voice.mp3"
+        signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
+        object_storage = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
+        object_storage.put_object(
+            namespace_name=OCI_NAMESPACE,
+            bucket_name=OCI_BUCKET,
+            object_name=object_key,
+            put_object_body=tts_response.content,
+            content_type="audio/mpeg",
         )
 
-        return s3_key
+        return object_key
 
 
     # ── TASK 7b: AI video generation via RunwayML ─────────────────────────────
@@ -585,11 +599,11 @@ with DAG(
     def generate_ai_video(article: dict, **context) -> str:
         """
         Send a visual prompt to RunwayML Gen-3 API.
-        Poll until video is ready, download and save to S3.
-        Returns S3 key.
+        Poll until video is ready, download and save to OCI Object Storage.
+        Returns object key.
         """
         import requests
-        import boto3
+        import oci
         import time
         from datetime import datetime
 
@@ -638,17 +652,20 @@ with DAG(
         else:
             raise TimeoutError("RunwayML video generation timed out")
 
-        # Download and upload to S3
+        # Download and upload to OCI Object Storage
         video_content = requests.get(video_url, timeout=60).content
-        s3_key = f"{week}/video/raw/runway.mp4"
-        boto3.client("s3").put_object(
-            Bucket=S3_BUCKET,
-            Key=s3_key,
-            Body=video_content,
-            ContentType="video/mp4",
+        object_key = f"{week}/video/raw/runway.mp4"
+        signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
+        object_storage = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
+        object_storage.put_object(
+            namespace_name=OCI_NAMESPACE,
+            bucket_name=OCI_BUCKET,
+            object_name=object_key,
+            put_object_body=video_content,
+            content_type="video/mp4",
         )
 
-        return s3_key
+        return object_key
 
 
     # ── TASK 8: Compose final video with FFmpeg ────────────────────────────────
@@ -663,25 +680,41 @@ with DAG(
     )
     def compose_video(audio_key: str, video_key: str, **context) -> str:
         """
-        Download audio + video from S3, combine with FFmpeg,
-        generate short and long versions. Upload final to S3.
+        Download audio + video from OCI Object Storage, combine with FFmpeg,
+        generate short and long versions. Upload final to OCI Object Storage.
         """
         import subprocess
-        import boto3
+        import oci
         import tempfile
         import os
         from datetime import datetime
 
         week = datetime.now().strftime("%Y-%W")
-        s3 = boto3.client("s3")
+        signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
+        object_storage = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             audio_path = os.path.join(tmpdir, "voice.mp3")
             video_path = os.path.join(tmpdir, "raw.mp4")
             output_path = os.path.join(tmpdir, "final.mp4")
 
-            s3.download_file(S3_BUCKET, audio_key, audio_path)
-            s3.download_file(S3_BUCKET, video_key, video_path)
+            # Download audio
+            audio_resp = object_storage.get_object(
+                namespace_name=OCI_NAMESPACE,
+                bucket_name=OCI_BUCKET,
+                object_name=audio_key,
+            )
+            with open(audio_path, "wb") as f:
+                f.write(audio_resp.data.content)
+
+            # Download video
+            video_resp = object_storage.get_object(
+                namespace_name=OCI_NAMESPACE,
+                bucket_name=OCI_BUCKET,
+                object_name=video_key,
+            )
+            with open(video_path, "wb") as f:
+                f.write(video_resp.data.content)
 
             # Combine video + audio, loop video to match audio length
             subprocess.run(
@@ -700,11 +733,12 @@ with DAG(
 
             final_key = f"{week}/video/final/short.mp4"
             with open(output_path, "rb") as f:
-                s3.put_object(
-                    Bucket=S3_BUCKET,
-                    Key=final_key,
-                    Body=f.read(),
-                    ContentType="video/mp4",
+                object_storage.put_object(
+                    namespace_name=OCI_NAMESPACE,
+                    bucket_name=OCI_BUCKET,
+                    object_name=final_key,
+                    put_object_body=f.read(),
+                    content_type="video/mp4",
                 )
 
         return final_key
@@ -722,22 +756,30 @@ with DAG(
     )
     def notify_telegram(article: dict, video_key: str, **context) -> None:
         """
-        Download final video from S3 and send to Telegram.
+        Download final video from OCI Object Storage and send to Telegram.
         The Telegram bot (always-on deployment) handles the
         human approval loop independently via callback buttons.
         """
-        import boto3
+        import oci
         import requests
         import tempfile
         import os
         from datetime import datetime
 
         week = datetime.now().strftime("%Y-%W")
-        s3 = boto3.client("s3")
+        signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
+        object_storage = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             video_path = os.path.join(tmpdir, "final.mp4")
-            s3.download_file(S3_BUCKET, video_key, video_path)
+
+            video_resp = object_storage.get_object(
+                namespace_name=OCI_NAMESPACE,
+                bucket_name=OCI_BUCKET,
+                object_name=video_key,
+            )
+            with open(video_path, "wb") as f:
+                f.write(video_resp.data.content)
 
             caption = (
                 f"*Week {week} content ready for review*\n\n"
