@@ -23,23 +23,22 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.decorators import task
 from airflow.models import Variable
-from airflow.operators.python import BranchPythonOperator
 
 # ── Ollama endpoints (internal K8s services) ─────────────────────────────────
-OLLAMA_70B_URL = "http://ollama-70b.ai.svc.cluster.local:11434"   # GPU node
-OLLAMA_8B_URL  = "http://ollama-8b.ai.svc.cluster.local:11434"    # CPU node
+OLLAMA_70B_URL = "http://ollama-70b.ai.svc.cluster.local:11434"  # GPU node
+OLLAMA_8B_URL = "http://ollama-8b.ai.svc.cluster.local:11434"  # CPU node
 
 # ── Other internal services ───────────────────────────────────────────────────
-QDRANT_URL     = "http://qdrant.data.svc.cluster.local:6333"
-SEARXNG_URL    = "http://searxng.ai.svc.cluster.local:8080"
-KOKORO_URL     = "http://kokoro-tts.ai.svc.cluster.local:8880"
+QDRANT_URL = "http://qdrant.data.svc.cluster.local:6333"
+SEARXNG_URL = "http://searxng.ai.svc.cluster.local:8080"
+KOKORO_URL = "http://kokoro-tts.ai.svc.cluster.local:8880"
 
 # ── OCI / external ────────────────────────────────────────────────────────────
-OCI_BUCKET     = Variable.get("OCI_BUCKET", default_var="content-automation")
-OCI_NAMESPACE  = Variable.get("OCI_NAMESPACE")
+OCI_BUCKET = Variable.get("OCI_BUCKET", default_var="content-automation")
+OCI_NAMESPACE = Variable.get("OCI_NAMESPACE")
 RUNWAY_API_KEY = Variable.get("RUNWAY_API_KEY")
 TELEGRAM_TOKEN = Variable.get("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT  = Variable.get("TELEGRAM_CHAT_ID")
+TELEGRAM_CHAT = Variable.get("TELEGRAM_CHAT_ID")
 
 
 default_args = {
@@ -52,13 +51,12 @@ default_args = {
 with DAG(
     dag_id="weekly_content_pipeline",
     description="Medium scrape → RAG article → fact check → AI video → Telegram review → publish",
-    schedule="0 8 * * 1",          # Every Monday 08:00
+    schedule="0 8 * * 1",  # Every Monday 08:00
     start_date=datetime(2025, 1, 1),
     catchup=False,
     default_args=default_args,
     tags=["content", "weekly", "llm", "video"],
 ) as dag:
-
     # ── TASK 1: Scrape top 10 Medium articles ─────────────────────────────────
     @task(
         task_id="scrape_medium",
@@ -75,10 +73,11 @@ with DAG(
         Returns list of: {title, url, content, tags, published}
         Saves raw JSON to OCI Object Storage: YYYY-WW/raw/articles.json
         """
-        import feedparser
-        import oci
         import json
         from datetime import datetime
+
+        import feedparser
+        import oci
 
         week = datetime.now().strftime("%Y-%W")
 
@@ -95,18 +94,22 @@ with DAG(
         for url in feeds:
             feed = feedparser.parse(url)
             for entry in feed.entries[:2]:  # top 2 per feed = 10 total
-                articles.append({
-                    "title": entry.title,
-                    "url": entry.link,
-                    "summary": entry.get("summary", ""),
-                    "tags": [t.term for t in entry.get("tags", [])],
-                    "published": str(entry.get("published", "")),
-                    "source_feed": url,
-                })
+                articles.append(
+                    {
+                        "title": entry.title,
+                        "url": entry.link,
+                        "summary": entry.get("summary", ""),
+                        "tags": [t.term for t in entry.get("tags", [])],
+                        "published": str(entry.get("published", "")),
+                        "source_feed": url,
+                    }
+                )
 
         # Save to OCI Object Storage (uses OKE workload identity)
         signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
-        object_storage = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
+        object_storage = oci.object_storage.ObjectStorageClient(
+            config={}, signer=signer
+        )
         object_storage.put_object(
             namespace_name=OCI_NAMESPACE,
             bucket_name=OCI_BUCKET,
@@ -116,7 +119,6 @@ with DAG(
         )
 
         return articles  # XCom to next task
-
 
     # ── TASK 2: Research topics via SearXNG ───────────────────────────────────
     @task(
@@ -134,10 +136,11 @@ with DAG(
         then SearXNG to deep-search that topic.
         Returns enriched research docs.
         """
-        import requests
         import json
-        import oci
         from datetime import datetime
+
+        import oci
+        import requests
 
         week = datetime.now().strftime("%Y-%W")
         research_results = []
@@ -172,15 +175,19 @@ with DAG(
             )
             search_data = search_response.json()
 
-            research_results.append({
-                "original_article": article,
-                "extracted_topic": topic,
-                "search_results": search_data.get("results", [])[:10],
-            })
+            research_results.append(
+                {
+                    "original_article": article,
+                    "extracted_topic": topic,
+                    "search_results": search_data.get("results", [])[:10],
+                }
+            )
 
         # Save to OCI Object Storage
         signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
-        object_storage = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
+        object_storage = oci.object_storage.ObjectStorageClient(
+            config={}, signer=signer
+        )
         object_storage.put_object(
             namespace_name=OCI_NAMESPACE,
             bucket_name=OCI_BUCKET,
@@ -190,7 +197,6 @@ with DAG(
         )
 
         return research_results
-
 
     # ── TASK 3: Embed and store in Qdrant ─────────────────────────────────────
     @task(
@@ -207,16 +213,19 @@ with DAG(
         Embed all research content using sentence-transformers
         and store in Qdrant. Returns the collection name for RAG.
         """
-        from sentence_transformers import SentenceTransformer
-        from qdrant_client import QdrantClient
-        from qdrant_client.models import Distance, VectorParams, PointStruct
-        from datetime import datetime
         import uuid
+        from datetime import datetime
+
+        from qdrant_client import QdrantClient
+        from qdrant_client.models import Distance, PointStruct, VectorParams
+        from sentence_transformers import SentenceTransformer
 
         week = datetime.now().strftime("%Y-%W")
         collection_name = f"content_{week.replace('-', '_')}"
 
-        model = SentenceTransformer("nomic-ai/nomic-embed-text-v1", trust_remote_code=True)
+        model = SentenceTransformer(
+            "nomic-ai/nomic-embed-text-v1", trust_remote_code=True
+        )
         client = QdrantClient(url=QDRANT_URL)
 
         # Create collection
@@ -251,7 +260,6 @@ with DAG(
         client.upsert(collection_name=collection_name, points=points)
         return collection_name
 
-
     # ── TASK 4: Generate article via RAG + Llama 3.1 70B ──────────────────────
     @task(
         task_id="generate_article",
@@ -262,7 +270,11 @@ with DAG(
                 "request_cpu": "1000m",
                 "node_selector": {"workload": "gpu"},
                 "tolerations": [
-                    {"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}
+                    {
+                        "key": "nvidia.com/gpu",
+                        "operator": "Exists",
+                        "effect": "NoSchedule",
+                    }
                 ],
             }
         },
@@ -272,20 +284,25 @@ with DAG(
         RAG: retrieve context from Qdrant, generate long-form article
         using Llama 3.1 70B on GPU node.
         """
-        import requests
-        import oci
         import json
-        from sentence_transformers import SentenceTransformer
-        from qdrant_client import QdrantClient
         from datetime import datetime
+
+        import oci
+        import requests
+        from qdrant_client import QdrantClient
+        from sentence_transformers import SentenceTransformer
 
         week = datetime.now().strftime("%Y-%W")
 
         # Retrieve top context from Qdrant
-        model = SentenceTransformer("nomic-ai/nomic-embed-text-v1", trust_remote_code=True)
+        model = SentenceTransformer(
+            "nomic-ai/nomic-embed-text-v1", trust_remote_code=True
+        )
         qdrant = QdrantClient(url=QDRANT_URL)
 
-        query = "latest trends and insights in DevOps, Kubernetes, and platform engineering"
+        query = (
+            "latest trends and insights in DevOps, Kubernetes, and platform engineering"
+        )
         query_vector = model.encode([query])[0].tolist()
 
         results = qdrant.search(
@@ -335,7 +352,9 @@ with DAG(
 
         # Save to OCI Object Storage
         signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
-        object_storage = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
+        object_storage = oci.object_storage.ObjectStorageClient(
+            config={}, signer=signer
+        )
         object_storage.put_object(
             namespace_name=OCI_NAMESPACE,
             bucket_name=OCI_BUCKET,
@@ -353,7 +372,6 @@ with DAG(
 
         return article
 
-
     # ── TASK 5: Fact check with Llama 3.1 8B ──────────────────────────────────
     @task(
         task_id="fact_check",
@@ -369,10 +387,11 @@ with DAG(
         Split article into claims, verify each against SearXNG,
         use Llama 3.1 8B to judge accuracy. Returns corrected article.
         """
-        import requests
-        import oci
         import json
         from datetime import datetime
+
+        import oci
+        import requests
 
         week = datetime.now().strftime("%Y-%W")
 
@@ -447,17 +466,20 @@ with DAG(
 
         # Save fact-check report to OCI Object Storage
         signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
-        object_storage = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
+        object_storage = oci.object_storage.ObjectStorageClient(
+            config={}, signer=signer
+        )
         object_storage.put_object(
             namespace_name=OCI_NAMESPACE,
             bucket_name=OCI_BUCKET,
             object_name=f"{week}/articles/fact_check_report.json",
-            put_object_body=json.dumps({"issues": issues, "passed": article["fact_check_passed"]}, indent=2),
+            put_object_body=json.dumps(
+                {"issues": issues, "passed": article["fact_check_passed"]}, indent=2
+            ),
             content_type="application/json",
         )
 
         return article
-
 
     # ── TASK 6: Generate video script ─────────────────────────────────────────
     @task(
@@ -474,10 +496,11 @@ with DAG(
         Summarize article into a 60-90 second video script (short)
         and a 5-7 minute script (long) using Llama 3.1 8B.
         """
-        import requests
-        import oci
         import json
         from datetime import datetime
+
+        import oci
+        import requests
 
         week = datetime.now().strftime("%Y-%W")
 
@@ -503,7 +526,7 @@ with DAG(
                             f"   - 3 main points with examples\n"
                             f"   - Conclusion + CTA\n\n"
                             f"Article:\n{article['content'][:2000]}\n\n"
-                            f"Return as JSON: {{\"short\": \"...\", \"long\": \"...\"}}"
+                            f'Return as JSON: {{"short": "...", "long": "..."}}'
                         ),
                     },
                 ],
@@ -524,7 +547,9 @@ with DAG(
         article["scripts"] = scripts
 
         signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
-        object_storage = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
+        object_storage = oci.object_storage.ObjectStorageClient(
+            config={}, signer=signer
+        )
         object_storage.put_object(
             namespace_name=OCI_NAMESPACE,
             bucket_name=OCI_BUCKET,
@@ -534,7 +559,6 @@ with DAG(
         )
 
         return article
-
 
     # ── TASK 7a: Voice synthesis via Kokoro TTS ───────────────────────────────
     @task(
@@ -551,9 +575,10 @@ with DAG(
         Send short script to Kokoro TTS, save MP3 to OCI Object Storage.
         Returns object key for audio file.
         """
-        import requests
-        import oci
         from datetime import datetime
+
+        import oci
+        import requests
 
         week = datetime.now().strftime("%Y-%W")
 
@@ -565,7 +590,7 @@ with DAG(
             json={
                 "model": "kokoro",
                 "input": script_text,
-                "voice": "af_sky",   # available Kokoro voices: af_sky, af_bella, am_adam
+                "voice": "af_sky",  # available Kokoro voices: af_sky, af_bella, am_adam
                 "response_format": "mp3",
             },
             timeout=120,
@@ -574,7 +599,9 @@ with DAG(
 
         object_key = f"{week}/audio/voice.mp3"
         signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
-        object_storage = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
+        object_storage = oci.object_storage.ObjectStorageClient(
+            config={}, signer=signer
+        )
         object_storage.put_object(
             namespace_name=OCI_NAMESPACE,
             bucket_name=OCI_BUCKET,
@@ -584,7 +611,6 @@ with DAG(
         )
 
         return object_key
-
 
     # ── TASK 7b: AI video generation via RunwayML ─────────────────────────────
     @task(
@@ -602,10 +628,11 @@ with DAG(
         Poll until video is ready, download and save to OCI Object Storage.
         Returns object key.
         """
-        import requests
-        import oci
         import time
         from datetime import datetime
+
+        import oci
+        import requests
 
         week = datetime.now().strftime("%Y-%W")
 
@@ -656,7 +683,9 @@ with DAG(
         video_content = requests.get(video_url, timeout=60).content
         object_key = f"{week}/video/raw/runway.mp4"
         signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
-        object_storage = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
+        object_storage = oci.object_storage.ObjectStorageClient(
+            config={}, signer=signer
+        )
         object_storage.put_object(
             namespace_name=OCI_NAMESPACE,
             bucket_name=OCI_BUCKET,
@@ -666,7 +695,6 @@ with DAG(
         )
 
         return object_key
-
 
     # ── TASK 8: Compose final video with FFmpeg ────────────────────────────────
     @task(
@@ -683,15 +711,18 @@ with DAG(
         Download audio + video from OCI Object Storage, combine with FFmpeg,
         generate short and long versions. Upload final to OCI Object Storage.
         """
-        import subprocess
-        import oci
-        import tempfile
         import os
+        import subprocess
+        import tempfile
         from datetime import datetime
+
+        import oci
 
         week = datetime.now().strftime("%Y-%W")
         signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
-        object_storage = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
+        object_storage = oci.object_storage.ObjectStorageClient(
+            config={}, signer=signer
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             audio_path = os.path.join(tmpdir, "voice.mp3")
@@ -719,12 +750,21 @@ with DAG(
             # Combine video + audio, loop video to match audio length
             subprocess.run(
                 [
-                    "ffmpeg", "-y",
-                    "-stream_loop", "-1", "-i", video_path,
-                    "-i", audio_path,
-                    "-c:v", "libx264", "-c:a", "aac",
+                    "ffmpeg",
+                    "-y",
+                    "-stream_loop",
+                    "-1",
+                    "-i",
+                    video_path,
+                    "-i",
+                    audio_path,
+                    "-c:v",
+                    "libx264",
+                    "-c:a",
+                    "aac",
                     "-shortest",
-                    "-vf", "scale=1080:1920",  # vertical for Reels/Shorts
+                    "-vf",
+                    "scale=1080:1920",  # vertical for Reels/Shorts
                     output_path,
                 ],
                 check=True,
@@ -743,7 +783,6 @@ with DAG(
 
         return final_key
 
-
     # ── TASK 9: Send to Telegram for review ───────────────────────────────────
     @task(
         task_id="notify_telegram",
@@ -760,15 +799,18 @@ with DAG(
         The Telegram bot (always-on deployment) handles the
         human approval loop independently via callback buttons.
         """
+        import os
+        import tempfile
+        from datetime import datetime
+
         import oci
         import requests
-        import tempfile
-        import os
-        from datetime import datetime
 
         week = datetime.now().strftime("%Y-%W")
         signer = oci.auth.signers.InstancePrincipalsSecurityTokenSigner()
-        object_storage = oci.object_storage.ObjectStorageClient(config={}, signer=signer)
+        object_storage = oci.object_storage.ObjectStorageClient(
+            config={}, signer=signer
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             video_path = os.path.join(tmpdir, "final.mp4")
@@ -805,18 +847,17 @@ with DAG(
                     timeout=60,
                 )
 
-
     # ── DAG wiring ────────────────────────────────────────────────────────────
-    articles       = scrape_medium()
-    research       = research_topics(articles)
-    collection     = embed_and_store(research)
-    article        = generate_article(collection)
-    checked        = fact_check(article)
-    scripted       = generate_video_script(checked)
+    articles = scrape_medium()
+    research = research_topics(articles)
+    collection = embed_and_store(research)
+    article = generate_article(collection)
+    checked = fact_check(article)
+    scripted = generate_video_script(checked)
 
     # Parallel: voice + AI video
-    audio_key      = synthesize_voice(scripted)
-    raw_video_key  = generate_ai_video(scripted)
+    audio_key = synthesize_voice(scripted)
+    raw_video_key = generate_ai_video(scripted)
 
-    final_key      = compose_video(audio_key, raw_video_key)
+    final_key = compose_video(audio_key, raw_video_key)
     notify_telegram(scripted, final_key)
