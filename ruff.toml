@@ -1,0 +1,14 @@
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "W", "I"]   # pycodestyle errors, pyflakes, warnings, isort
+ignore = [
+    "E501",   # line too long (DAG files have long strings)
+]
+
+[lint.per-file-ignores]
+"dags/*.py" = ["E402"]          # module imports not at top (Airflow pattern)
+
+[format]
+quote-style = "double"
+indent-style = "space"
